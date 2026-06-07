@@ -100,7 +100,7 @@ export default function PublicLayout({ children }) {
                     </div>
                 </div>
                 <div className="container mx-auto px-4 text-center text-sm border-t border-slate-700 mt-8 pt-6">
-                    © 2026 Pemerintah Kota Sungai Penuh. All Rights Reserved.
+                    &copy; {new Date().getFullYear()} Bag.Or SETDA Pemerintah Kota Sungai Penuh. All Rights Reserved.
                 </div>
             </footer>
         </div>
