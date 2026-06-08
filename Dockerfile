@@ -56,5 +56,5 @@ RUN chown -R www-data:www-data /var/www/html \
 # Expose port 80
 EXPOSE 80
 
-# Start Apache
-CMD ["apache2-foreground"]
+# Start Apache and run migrations beforehand
+CMD php artisan migrate --force && apache2-foreground
