@@ -10,11 +10,11 @@ RUN npm run build
 # Stage 2: Install PHP dependencies
 FROM composer:2.7 AS vendor
 WORKDIR /app
-COPY composer.json composer.lock ./
+COPY . .
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs
 
 # Stage 3: Setup Production Image
-FROM php:8.2-apache
+FROM php:8.3-apache
 
 # Install system dependencies & PHP extensions
 RUN apt-get update && apt-get install -y \
