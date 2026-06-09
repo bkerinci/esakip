@@ -11,7 +11,7 @@ RUN npm run build
 FROM composer:2.7 AS vendor
 WORKDIR /app
 COPY . .
-RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs --no-scripts
 
 # Stage 3: Setup Production Image
 FROM php:8.3-apache
@@ -52,6 +52,12 @@ COPY --from=frontend /app/public/build/ ./public/build/
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 775 /var/www/html/storage \
     && chmod -R 775 /var/www/html/bootstrap/cache
+
+# Run Laravel optimizations
+RUN php artisan package:discover --ansi \
+    && php artisan config:cache \
+    && php artisan route:cache \
+    && php artisan view:cache
 
 # Expose port 80
 EXPOSE 80
