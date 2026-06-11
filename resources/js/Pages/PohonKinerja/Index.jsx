@@ -1,8 +1,21 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, useForm, router, usePage } from '@inertiajs/react';
-import { ReactFlow, Controls, Background, Handle, Position, Panel, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
+import { 
+    ReactFlow, 
+    Controls, 
+    Background, 
+    Handle, 
+    Position, 
+    Panel, 
+    applyNodeChanges, 
+    applyEdgeChanges,
+    MiniMap,
+    addEdge,
+    useReactFlow,
+    ReactFlowProvider
+} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import dagre from 'dagre';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -11,132 +24,276 @@ import InputLabel from '@/Components/InputLabel';
 import TextInput from '@/Components/TextInput';
 import PrimaryButton from '@/Components/PrimaryButton';
 import SecondaryButton from '@/Components/SecondaryButton';
+import axios from 'axios';
 
-// Utility to apply dagre layout
-const getLayoutedElements = (nodes, edges, direction = 'TB') => {
-  const dagreGraph = new dagre.graphlib.Graph();
-  dagreGraph.setDefaultEdgeLabel(() => ({}));
-  
-  const nodeWidth = 250;
-  const nodeHeight = 100;
-  
-  dagreGraph.setGraph({ rankdir: direction });
-  
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
-  });
-  
-  edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
-  });
-  
-  dagre.layout(dagreGraph);
-  
-  nodes.forEach((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    node.targetPosition = Position.Top;
-    node.sourcePosition = Position.Bottom;
+const getLayoutedElements = (nodes, edges, direction = 'TB', useStoredPosition = true) => {
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
     
-    // We are shifting the dagre node position to be top-left aligned
-    node.position = {
-      x: nodeWithPosition.x - nodeWidth / 2,
-      y: nodeWithPosition.y - nodeHeight / 2,
-    };
-  });
-  
-  return { nodes, edges };
+    const nodeWidth = 280;
+    const nodeHeight = 120;
+    
+    dagreGraph.setGraph({ rankdir: direction });
+    
+    nodes.forEach((node) => {
+        dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+    });
+    
+    edges.forEach((edge) => {
+        dagreGraph.setEdge(edge.source, edge.target);
+    });
+    
+    dagre.layout(dagreGraph);
+    
+    return nodes.map((node) => {
+        const nodeWithPosition = dagreGraph.node(node.id);
+        const targetPosition = direction === 'LR' ? Position.Left : Position.Top;
+        const sourcePosition = direction === 'LR' ? Position.Right : Position.Bottom;
+        
+        let position = node.position;
+        // if forcing layout or no stored position, use dagre's position
+        if (!useStoredPosition || !node.data.has_position) {
+            position = {
+                x: nodeWithPosition.x - nodeWidth / 2,
+                y: nodeWithPosition.y - nodeHeight / 2,
+            };
+        }
+
+        return {
+            ...node,
+            targetPosition,
+            sourcePosition,
+            position
+        };
+    });
 };
 
 const CustomNode = ({ data, selected }) => {
     let bgColor = 'bg-gray-400';
-    if (data.jenis_node === 'visi' || data.jenis_node === 'misi') bgColor = 'bg-blue-600';
-    if (data.jenis_node === 'sasaran_pemda') bgColor = 'bg-blue-500';
-    if (data.jenis_node === 'sasaran_opd') bgColor = 'bg-green-500';
-    if (data.jenis_node === 'program' || data.jenis_node === 'kegiatan' || data.jenis_node === 'iku_individu') bgColor = 'bg-blue-500';
+    // Visi = Biru Tua, Misi = Biru, Tujuan = Hijau, Sasaran = Kuning, Program = Orange, Kegiatan = Merah, IKU = Ungu
+    if (data.jenis_node === 'visi') bgColor = 'bg-blue-800';
+    else if (data.jenis_node === 'misi') bgColor = 'bg-blue-600';
+    else if (data.jenis_node === 'tujuan') bgColor = 'bg-green-600';
+    else if (data.jenis_node === 'sasaran' || data.jenis_node === 'sasaran_pemda' || data.jenis_node === 'sasaran_opd') bgColor = 'bg-yellow-500';
+    else if (data.jenis_node === 'program') bgColor = 'bg-orange-500';
+    else if (data.jenis_node === 'kegiatan' || data.jenis_node === 'sub_kegiatan') bgColor = 'bg-red-500';
+    else if (data.jenis_node === 'iku_individu') bgColor = 'bg-purple-600';
+    
     if (data.is_crosscutting) bgColor = 'bg-purple-500';
 
+    const capaianColor = (data.capaian >= 80) ? 'bg-green-400' : (data.capaian >= 50 ? 'bg-yellow-400' : 'bg-red-400');
+
     return (
-        <div className={`shadow-lg rounded-xl border-2 p-4 transition-all ${bgColor} text-white w-[250px] min-h-[100px] flex flex-col justify-center items-center text-center relative group ${selected ? 'border-yellow-300 ring-4 ring-yellow-300/50 scale-105' : 'border-transparent hover:shadow-xl'}`}>
-            <Handle type="target" position={Position.Top} className="!bg-white" />
+        <div className={`shadow-lg rounded-xl border-2 p-4 transition-all ${bgColor} text-white w-[280px] min-h-[120px] flex flex-col justify-start relative group ${selected ? 'border-yellow-300 ring-4 ring-yellow-300/50 scale-105' : 'border-transparent hover:shadow-xl'}`}>
+            <Handle type="target" position={data.targetPosition || Position.Top} className="!bg-white w-3 h-3" />
             
             {data.jenis_node !== 'default' && (
-                <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     <button data-action="edit" className="bg-white/20 hover:bg-white/40 p-1 rounded text-xs leading-none" title="Edit">✏️</button>
                     <button data-action="delete" className="bg-red-500/80 hover:bg-red-600 p-1 rounded text-xs leading-none" title="Hapus">🗑️</button>
                 </div>
             )}
 
-            <strong className="text-sm uppercase tracking-wide opacity-80 mt-2">{data.jenis_node?.replace('_', ' ')}</strong>
-            <p className="text-sm mt-1">{data.deskripsi || 'Tidak ada deskripsi'}</p>
+            <div className="flex justify-between items-center w-full mb-1">
+                <strong className="text-xs uppercase tracking-wide opacity-90 font-bold bg-black/20 px-2 py-0.5 rounded">
+                    {data.jenis_node?.replace('_', ' ')}
+                </strong>
+                {data.jenis_node !== 'default' && (
+                    <div className="flex items-center space-x-1" title={`Capaian: ${data.capaian}%`}>
+                        <span className={`w-3 h-3 rounded-full ${capaianColor} border border-white/50 shadow-sm`}></span>
+                        <span className="text-xs font-semibold">{data.capaian}%</span>
+                    </div>
+                )}
+            </div>
+            
+            {data.isEditing ? (
+                <textarea 
+                    className="w-full text-sm text-black rounded p-1 mt-1 border-none focus:ring-2 focus:ring-blue-300 resize-none"
+                    defaultValue={data.deskripsi}
+                    autoFocus
+                    onBlur={(e) => data.onInlineEdit(data.original_id, e.target.value)}
+                    onKeyDown={(e) => { if(e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
+                />
+            ) : (
+                <p 
+                    className="text-sm mt-1 font-medium cursor-pointer hover:bg-white/10 p-1 rounded -ml-1 transition-colors flex-grow"
+                    onDoubleClick={() => data.setInlineEditing(data.original_id)}
+                    title="Double click to edit"
+                >
+                    {data.deskripsi || 'Tidak ada deskripsi'}
+                </p>
+            )}
+
             {data.indikator && (
-                <div className="mt-2 text-xs opacity-90 border-t border-white/30 pt-1 w-full">
-                    Ind: {data.indikator} <br/> Trg: {data.target}
+                <div className="mt-2 text-[11px] opacity-90 border-t border-white/30 pt-1 w-full bg-black/10 rounded p-1.5">
+                    <div className="flex justify-between">
+                        <span className="truncate mr-2" title={data.indikator}>🎯 {data.indikator}</span>
+                        <span className="font-bold shrink-0">{data.target}</span>
+                    </div>
                 </div>
             )}
 
             {data.jenis_node !== 'default' && (
-                <div className="absolute -bottom-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     <button data-action="add" className="bg-white text-blue-600 hover:bg-gray-100 rounded-full w-6 h-6 flex items-center justify-center shadow-md font-bold text-lg leading-none pb-1" title="Tambah Cabang">+</button>
                 </div>
             )}
 
-            <Handle type="source" position={Position.Bottom} className="!bg-white" />
+            <Handle type="source" position={data.sourcePosition || Position.Bottom} className="!bg-white w-3 h-3" />
         </div>
     );
 };
 
-export default function PohonKinerja({ initialNodes, initialEdges }) {
+function FlowApp({ initialNodes, initialEdges }) {
     const { auth } = usePage().props;
     const userRole = auth.user.role;
 
     const [nodes, setNodes] = useState([]);
     const [edges, setEdges] = useState([]);
+    const [history, setHistory] = useState({ past: [], future: [] });
     
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editMode, setEditMode] = useState(false);
     const [editNodeId, setEditNodeId] = useState(null);
     const [selectedNodes, setSelectedNodes] = useState([]);
+    const [layoutMode, setLayoutMode] = useState('TB'); // TB, LR
+    
+    const [aiModalOpen, setAiModalOpen] = useState(false);
+    const [aiPrompt, setAiPrompt] = useState('');
+    
     const flowRef = useRef(null);
+    const containerRef = useRef(null);
 
-    const { data, setData, post, put, processing, reset, errors } = useForm({
+    const { data, setData, post, put, processing, reset } = useForm({
         parent_id: '',
-        jenis_node: 'misi',
+        jenis_node: 'tujuan',
         deskripsi: '',
         indikator: '',
         target: '',
         is_crosscutting: false
     });
 
-    const nodeTypes = useMemo(() => ({ custom: CustomNode }), []);
-    
-    const onNodesChange = (changes) => setNodes((nds) => applyNodeChanges(changes, nds));
-    const onEdgesChange = (changes) => setEdges((eds) => applyEdgeChanges(changes, eds));
+    const setInlineEditing = useCallback((id) => {
+        setNodes((nds) => nds.map(n => {
+            if (n.data.original_id === id) {
+                return { ...n, data: { ...n.data, isEditing: true } };
+            }
+            return n;
+        }));
+    }, []);
 
+    const onInlineEdit = useCallback((id, newDesc) => {
+        setNodes((nds) => nds.map(n => {
+            if (n.data.original_id === id) {
+                // Update on server silently
+                axios.put(route('pohon-kinerja.update', id), {
+                    deskripsi: newDesc,
+                    jenis_node: n.data.jenis_node,
+                    indikator: n.data.indikator,
+                    target: n.data.target,
+                    is_crosscutting: n.data.is_crosscutting
+                });
+                return { ...n, data: { ...n.data, isEditing: false, deskripsi: newDesc, label: n.data.jenis_node + ': ' + newDesc } };
+            }
+            return n;
+        }));
+    }, []);
+
+    const nodeTypes = useMemo(() => ({ custom: CustomNode }), []);
+
+    // Initialize
     useEffect(() => {
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-            initialNodes,
-            initialEdges
-        );
+        const layoutedNodes = getLayoutedElements(initialNodes, initialEdges, 'TB', true);
         const nodesWithRole = layoutedNodes.map(node => ({
             ...node,
-            data: { ...node.data, userRole }
+            data: { ...node.data, userRole, setInlineEditing, onInlineEdit }
         }));
         setNodes(nodesWithRole);
-        setEdges(layoutedEdges);
-    }, [initialNodes, initialEdges, userRole]);
+        setEdges(initialEdges);
+    }, [initialNodes, initialEdges, userRole, setInlineEditing, onInlineEdit]);
+
+    const saveHistory = useCallback(() => {
+        setHistory(h => ({
+            past: [...h.past, { nodes, edges }],
+            future: []
+        }));
+    }, [nodes, edges]);
+
+    const handleUndo = useCallback(() => {
+        setHistory(h => {
+            if (h.past.length === 0) return h;
+            const previous = h.past[h.past.length - 1];
+            const newPast = h.past.slice(0, h.past.length - 1);
+            setNodes(previous.nodes);
+            setEdges(previous.edges);
+            return { past: newPast, future: [{ nodes, edges }, ...h.future] };
+        });
+    }, [nodes, edges]);
+
+    const handleRedo = useCallback(() => {
+        setHistory(h => {
+            if (h.future.length === 0) return h;
+            const next = h.future[0];
+            const newFuture = h.future.slice(1);
+            setNodes(next.nodes);
+            setEdges(next.edges);
+            return { past: [...h.past, { nodes, edges }], future: newFuture };
+        });
+    }, [nodes, edges]);
+
+    // Keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.ctrlKey && e.key === 'z') { e.preventDefault(); handleUndo(); }
+            if (e.ctrlKey && e.key === 'y') { e.preventDefault(); handleRedo(); }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [handleUndo, handleRedo]);
+
+    const onNodesChange = useCallback((changes) => {
+        setNodes((nds) => applyNodeChanges(changes, nds));
+    }, []);
+
+    const onEdgesChange = useCallback((changes) => {
+        setEdges((eds) => applyEdgeChanges(changes, eds));
+    }, []);
+
+    const onNodeDragStop = useCallback((event, node) => {
+        if (node.data.jenis_node === 'default') return;
+        // Save history before change? The drag already happened.
+        axios.put(route('pohon-kinerja.update-position', node.data.original_id), {
+            x: node.position.x,
+            y: node.position.y
+        }).catch(err => console.error("Auto-save position failed", err));
+    }, []);
+
+    const onConnect = useCallback((connection) => {
+        // Enforce hierarchy rules? Or just connect in backend
+        axios.put(route('pohon-kinerja.update-connection', connection.target), {
+            parent_id: connection.source
+        }).then(res => {
+            if(res.data.success) {
+                setEdges((eds) => addEdge({ ...connection, type: 'smoothstep' }, eds));
+                router.reload({ only: ['initialNodes', 'initialEdges'] });
+            }
+        }).catch(err => {
+            alert("Gagal menghubungkan node. " + (err.response?.data?.message || ''));
+        });
+    }, []);
 
     const getNextJenisNode = (currentJenis) => {
          if (currentJenis === 'visi') return 'misi';
-         if (currentJenis === 'misi') return 'sasaran_pemda';
-         if (currentJenis === 'sasaran_pemda') return 'sasaran_opd';
-         if (currentJenis === 'sasaran_opd') return 'program';
+         if (currentJenis === 'misi') return 'tujuan';
+         if (currentJenis === 'tujuan') return 'sasaran';
+         if (currentJenis === 'sasaran') return 'program';
          if (currentJenis === 'program') return 'kegiatan';
-         return 'iku_individu';
+         if (currentJenis === 'kegiatan') return 'sub_kegiatan';
+         return 'sub_kegiatan';
     };
 
     const handleNodeClick = (event, node) => {
         const button = event.target.closest('button[data-action]');
-        
         if (!button) {
             if (node.id === 'default-visi') {
                  setEditMode(false);
@@ -147,7 +304,6 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
         }
         
         const action = button.getAttribute('data-action');
-        
         if (action === 'add') {
              setEditMode(false);
              setData({
@@ -172,7 +328,7 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
              });
              setIsModalOpen(true);
         } else if (action === 'delete') {
-             if (confirm('Apakah Anda yakin ingin menghapus node ini beserta seluruh anak cabangnya?')) {
+             if (confirm('Hapus node ini beserta seluruh cabangnya?')) {
                  router.delete(route('pohon-kinerja.destroy', node.data.original_id));
              }
         }
@@ -180,137 +336,50 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
 
     const submitForm = (e) => {
         e.preventDefault();
-        
-        const onSuccessHandler = () => {
-            setIsModalOpen(false);
-            reset();
-        };
-
+        const onSuccessHandler = () => { setIsModalOpen(false); reset(); };
         if (editMode) {
-            put(route('pohon-kinerja.update', editNodeId), {
-                onSuccess: onSuccessHandler
+            put(route('pohon-kinerja.update', editNodeId), { onSuccess: onSuccessHandler });
+        } else {
+            post(route('pohon-kinerja.store'), { onSuccess: onSuccessHandler });
+        }
+    };
+
+    const handleDuplicate = () => {
+        if(selectedNodes.length > 0) {
+            router.post(route('pohon-kinerja.duplicate', selectedNodes[0].data.original_id), {}, {
+                onSuccess: () => setSelectedNodes([])
+            });
+        }
+    };
+
+    const applyLayout = (direction) => {
+        setLayoutMode(direction);
+        saveHistory();
+        const layoutedNodes = getLayoutedElements(nodes, edges, direction, false);
+        setNodes([...layoutedNodes]);
+        // Also we might want to save all these new positions to DB
+        layoutedNodes.forEach(n => {
+            if (n.data.original_id) {
+                axios.put(route('pohon-kinerja.update-position', n.data.original_id), { x: n.position.x, y: n.position.y });
+            }
+        });
+    };
+
+    const toggleFullscreen = () => {
+        if (!document.fullscreenElement) {
+            containerRef.current.requestFullscreen().catch(err => {
+                alert(`Error attempting to enable fullscreen: ${err.message}`);
             });
         } else {
-            post(route('pohon-kinerja.store'), {
-                onSuccess: onSuccessHandler
-            });
+            document.exitFullscreen();
         }
     };
 
-    const handlePrintPdf = async () => {
-        if (!flowRef.current) return;
-        
-        try {
-            // Tunggu sebentar untuk memastikan render selesai (opsional)
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            // Perbesar resolusi canvas dengan scale
-            const dataUrl = await toPng(flowRef.current, {
-                backgroundColor: '#f9fafb', // gray-50
-                cacheBust: true,
-                pixelRatio: 2,
-            });
-            
-            const flowWidth = flowRef.current.offsetWidth;
-            const flowHeight = flowRef.current.offsetHeight;
-            const headerHeight = 110;
-            const pdfWidth = flowWidth;
-            const pdfHeight = flowHeight + headerHeight;
-
-            const pdf = new jsPDF({
-                orientation: pdfWidth > pdfHeight ? 'landscape' : 'portrait',
-                unit: 'px',
-                format: [pdfWidth, pdfHeight]
-            });
-            
-            // Header Background Putih
-            pdf.setFillColor(255, 255, 255);
-            pdf.rect(0, 0, pdfWidth, headerHeight, 'F');
-
-            // Load Logo
-            const logoImg = new Image();
-            logoImg.src = '/images/logo_sungai_penuh.png';
-            await new Promise((resolve) => { 
-                logoImg.onload = resolve; 
-                logoImg.onerror = resolve; // fallback if image error
-            });
-
-            // Draw Logo
-            pdf.addImage(logoImg, 'PNG', 40, 20, 60, 65);
-
-            // Draw Text
-            pdf.setTextColor(0, 0, 0);
-            pdf.setFontSize(22);
-            pdf.setFont('helvetica', 'bold');
-            pdf.text("POHON KINERJA", 120, 45);
-
-            pdf.setFontSize(14);
-            const userOpd = auth.user.opd?.nama;
-            
-            if (userOpd) {
-                pdf.text(userOpd.toUpperCase(), 120, 65);
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text("Pemerintah Kota Sungai Penuh", 120, 80);
-            } else {
-                // Jika super admin (tanpa OPD spesifik)
-                pdf.text("PEMERINTAH KOTA SUNGAI PENUH", 120, 65);
-            }
-
-            // Draw a Line
-            pdf.setLineWidth(2);
-            pdf.setDrawColor(0, 0, 0);
-            pdf.line(40, 95, pdfWidth - 40, 95);
-            pdf.setLineWidth(0.5);
-            pdf.line(40, 98, pdfWidth - 40, 98);
-
-            // Draw the React Flow Image
-            pdf.addImage(dataUrl, 'PNG', 0, headerHeight, flowWidth, flowHeight);
-            pdf.save('pohon-kinerja.pdf');
-        } catch (error) {
-            console.error('Error generating PDF', error);
-            alert('Gagal menghasilkan PDF. Pastikan browser mendukung fitur ini.');
-        }
-    };
-
-    const handleSaveProject = () => {
-        // Buat header CSV yang kompatibel dengan Microsoft Visio Data Visualizer (Organization Chart)
-        const headers = ['Node ID', 'Name', 'Title', 'Manager ID', 'Indikator', 'Target', 'Crosscutting'];
-        
-        const rows = nodes.map(node => {
-            // Cari parent dari edges
-            const edge = edges.find(e => e.target === node.id);
-            const parentId = edge ? edge.source : '';
-            
-            // Fungsi untuk membersihkan teks agar aman di CSV
-            const cleanStr = (str) => {
-                if (!str) return '""';
-                const stringified = String(str).replace(/"/g, '""').replace(/\n/g, ' ');
-                return `"${stringified}"`;
-            };
-
-            return [
-                cleanStr(node.id),
-                cleanStr(node.data.deskripsi), // Muncul sebagai Nama Kotak di Visio
-                cleanStr(node.data.jenis_node), // Muncul sebagai Jabatan/Level di Visio
-                cleanStr(parentId),
-                cleanStr(node.data.indikator),
-                cleanStr(node.data.target),
-                cleanStr(node.data.is_crosscutting ? 'Yes' : 'No')
-            ].join(',');
+    const handleAIGenerate = (e) => {
+        e.preventDefault();
+        router.post(route('pohon-kinerja.ai-generate'), { prompt: aiPrompt }, {
+            onSuccess: () => { setAiModalOpen(false); setAiPrompt(''); }
         });
-
-        const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n'); // Tambahkan BOM utf-8 agar Excel/Visio baca dengan benar
-        
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", url);
-        downloadAnchorNode.setAttribute("download", "pohon-kinerja-visio.csv");
-        document.body.appendChild(downloadAnchorNode);
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
-        URL.revokeObjectURL(url);
     };
 
     return (
@@ -321,16 +390,17 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
                         <h2 className="text-xl font-semibold leading-tight text-gray-800">
                             Pohon Kinerja Interaktif
                         </h2>
-                        <span className="text-sm text-gray-500">Klik node untuk menambah cabang di bawahnya</span>
+                        <span className="text-sm text-gray-500">Klik ganda untuk edit teks. Tarik & Lepas (Drag) node untuk mengatur.</span>
                     </div>
                     <div className="flex space-x-2">
-                        <button onClick={handleSaveProject} className="bg-emerald-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-emerald-700 transition shadow flex items-center">
-                            <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
-                            Export Visio (CSV)
+                        <button onClick={() => setAiModalOpen(true)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-indigo-700 transition shadow flex items-center">
+                            ✨ AI Generate
                         </button>
-                        <button onClick={handlePrintPdf} className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition shadow flex items-center">
-                            <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                            Print PDF
+                        <button onClick={() => applyLayout('TB')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition shadow flex items-center ${layoutMode === 'TB' ? 'bg-gray-800 text-white' : 'bg-white text-gray-700 border'}`}>
+                            ⬇️ Vertical
+                        </button>
+                        <button onClick={() => applyLayout('LR')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition shadow flex items-center ${layoutMode === 'LR' ? 'bg-gray-800 text-white' : 'bg-white text-gray-700 border'}`}>
+                            ➡️ Horizontal
                         </button>
                     </div>
                 </div>
@@ -338,30 +408,36 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
         >
             <Head title="Pohon Kinerja" />
 
-            <div className="py-8 h-[calc(100vh-140px)]">
-                <div className="mx-auto max-w-7xl sm:px-6 lg:px-8 h-full">
-                    <div className="overflow-hidden bg-gray-50 shadow-sm sm:rounded-lg h-full border border-gray-200 relative" ref={flowRef}>
+            <div className="py-6 h-[calc(100vh-140px)]" ref={containerRef}>
+                <div className="mx-auto max-w-full px-4 h-full">
+                    <div className="overflow-hidden bg-gray-50 shadow-sm rounded-lg h-full border border-gray-200 relative">
+                        
+                        {/* Toolbar */}
+                        <div className="absolute top-4 left-4 z-10 flex space-x-2 bg-white p-2 rounded-lg shadow-md border border-gray-200">
+                            <button onClick={handleUndo} disabled={history.past.length === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-50" title="Undo (Ctrl+Z)">↩️</button>
+                            <button onClick={handleRedo} disabled={history.future.length === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-50" title="Redo (Ctrl+Y)">↪️</button>
+                            <div className="w-px h-6 bg-gray-300 self-center"></div>
+                            <button onClick={toggleFullscreen} className="p-1.5 rounded hover:bg-gray-100" title="Fullscreen">🔲</button>
+                        </div>
+
                         <ReactFlow 
+                            ref={flowRef}
                             nodes={nodes} 
                             edges={edges}
                             nodeTypes={nodeTypes}
                             onNodesChange={onNodesChange}
                             onEdgesChange={onEdgesChange}
+                            onNodeDragStop={onNodeDragStop}
+                            onConnect={onConnect}
                             onNodeClick={handleNodeClick}
                             onSelectionChange={({ nodes }) => setSelectedNodes(nodes)}
-                            onNodesDelete={(deleted) => {
-                                if (deleted.length > 0) {
-                                    const node = deleted[0];
-                                    const canDelete = node.data.jenis_node !== 'default';
-                                    if (canDelete && confirm('Apakah Anda yakin ingin menghapus node ini beserta semua cabang di bawahnya?')) {
-                                        router.delete(route('pohon-kinerja.destroy', node.id));
-                                    }
-                                }
-                            }}
                             fitView
+                            attributionPosition="bottom-right"
                         >
                             <Background color="#ccc" gap={16} />
                             <Controls />
+                            <MiniMap nodeStrokeColor="#ccc" nodeColor="#e2e8f0" zoomable pannable className="!bottom-12 !right-4" />
+                            
                             {selectedNodes.length > 0 && (
                                 <Panel position="top-center" className="bg-white p-2 shadow-xl rounded-lg border border-gray-300 flex items-center space-x-3 z-50 mt-4">
                                     <span className="text-sm text-gray-700 font-medium px-2 border-r border-gray-200">
@@ -369,6 +445,9 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
                                     </span>
                                     {selectedNodes[0].data.jenis_node !== 'default' ? (
                                         <>
+                                            <button onClick={handleDuplicate} className="bg-purple-50 text-purple-600 hover:bg-purple-100 px-3 py-1.5 rounded text-sm font-medium transition flex items-center">
+                                                📑 Duplicate Branch
+                                            </button>
                                             <button 
                                                 onClick={() => {
                                                     const node = selectedNodes[0];
@@ -386,24 +465,10 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
                                                 }}
                                                 className="bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded text-sm font-medium transition flex items-center"
                                             >
-                                                ✏️ Edit
-                                            </button>
-                                            <button 
-                                                onClick={() => {
-                                                    if (confirm('Apakah Anda yakin ingin menghapus node ini beserta semua cabang di bawahnya?')) {
-                                                        router.delete(route('pohon-kinerja.destroy', selectedNodes[0].id), {
-                                                            onSuccess: () => setSelectedNodes([])
-                                                        });
-                                                    }
-                                                }}
-                                                className="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded text-sm font-medium transition flex items-center"
-                                            >
-                                                🗑️ Hapus
+                                                ✏️ Edit Detail
                                             </button>
                                         </>
-                                    ) : (
-                                        <span className="text-xs text-gray-500 italic px-2">Hanya lihat (Read-only)</span>
-                                    )}
+                                    ) : null}
                                 </Panel>
                             )}
                         </ReactFlow>
@@ -411,6 +476,30 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
                 </div>
             </div>
 
+            {/* AI Generate Modal */}
+            <Modal show={aiModalOpen} onClose={() => setAiModalOpen(false)}>
+                <div className="p-6">
+                    <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center">✨ Generate Pohon Kinerja dengan AI</h2>
+                    <p className="text-sm text-gray-500 mb-4">Masukkan prompt untuk membuat kerangka awal pohon kinerja otomatis.</p>
+                    <form onSubmit={handleAIGenerate}>
+                        <textarea
+                            className="w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm h-32"
+                            placeholder="Contoh: Buatkan pohon kinerja Dinas Kominfo untuk peningkatan pelayanan publik digital."
+                            value={aiPrompt}
+                            onChange={(e) => setAiPrompt(e.target.value)}
+                            required
+                        ></textarea>
+                        <div className="mt-4 flex justify-end">
+                            <SecondaryButton onClick={() => setAiModalOpen(false)}>Batal</SecondaryButton>
+                            <PrimaryButton className="ml-3 bg-indigo-600 hover:bg-indigo-700" disabled={!aiPrompt}>
+                                Generate Sekarang
+                            </PrimaryButton>
+                        </div>
+                    </form>
+                </div>
+            </Modal>
+
+            {/* Node Modal */}
             <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)}>
                 <div className="p-6">
                     <h2 className="text-lg font-medium text-gray-900 mb-4">{editMode ? 'Edit Cabang Kinerja' : 'Tambah Cabang Kinerja'}</h2>
@@ -425,11 +514,11 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
                             >
                                 {userRole === 'super_admin' && <option value="visi">Visi Daerah</option>}
                                 {userRole === 'super_admin' && <option value="misi">Misi Daerah</option>}
-                                {userRole === 'super_admin' && <option value="sasaran_pemda">Sasaran Strategis Pemda</option>}
-                                <option value="sasaran_opd">Sasaran Strategis OPD</option>
+                                <option value="tujuan">Tujuan</option>
+                                <option value="sasaran">Sasaran Strategis</option>
                                 <option value="program">Program</option>
-                                <option value="kegiatan">Kegiatan / Sub Kegiatan</option>
-                                <option value="iku_individu">Kinerja Individu (ASN)</option>
+                                <option value="kegiatan">Kegiatan</option>
+                                <option value="sub_kegiatan">Sub Kegiatan</option>
                             </select>
                         </div>
                         
@@ -491,5 +580,13 @@ export default function PohonKinerja({ initialNodes, initialEdges }) {
                 </div>
             </Modal>
         </AuthenticatedLayout>
+    );
+}
+
+export default function PohonKinerja(props) {
+    return (
+        <ReactFlowProvider>
+            <FlowApp {...props} />
+        </ReactFlowProvider>
     );
 }

@@ -27,7 +27,7 @@ class PohonKinerjaController extends Controller
         foreach ($semuaNode as $node) {
             $nodes[] = [
                 'id' => (string) $node->id,
-                'position' => ['x' => 0, 'y' => 0], // position is required by ReactFlow but we'll override it dynamically in React
+                'position' => ['x' => $node->x ?? 0, 'y' => $node->y ?? 0],
                 'data' => [
                     'label' => $node->jenis_node . ': ' . $node->deskripsi,
                     'jenis_node' => $node->jenis_node,
@@ -35,7 +35,9 @@ class PohonKinerjaController extends Controller
                     'indikator' => $node->indikator,
                     'target' => $node->target,
                     'is_crosscutting' => $node->is_crosscutting,
-                    'original_id' => $node->id
+                    'capaian' => $node->capaian,
+                    'original_id' => $node->id,
+                    'has_position' => $node->x !== null && $node->y !== null
                 ],
                 'type' => 'custom', // custom node type
             ];
@@ -70,7 +72,7 @@ class PohonKinerjaController extends Controller
     {
         $request->validate([
             'deskripsi' => 'required|string',
-            'jenis_node' => 'required|in:visi,misi,sasaran_pemda,sasaran_opd,program,kegiatan,iku_individu',
+            'jenis_node' => 'required|in:visi,misi,tujuan,sasaran,program,kegiatan,sub_kegiatan',
             'parent_id' => 'nullable|exists:pohon_kinerjas,id',
             'indikator' => 'nullable|string',
             'target' => 'nullable|string',
@@ -95,7 +97,7 @@ class PohonKinerjaController extends Controller
     {
         $request->validate([
             'deskripsi' => 'required|string',
-            'jenis_node' => 'required|in:visi,misi,sasaran_pemda,sasaran_opd,program,kegiatan,iku_individu',
+            'jenis_node' => 'required|in:visi,misi,tujuan,sasaran,program,kegiatan,sub_kegiatan',
             'indikator' => 'nullable|string',
             'target' => 'nullable|string',
         ]);
@@ -134,5 +136,98 @@ class PohonKinerjaController extends Controller
         $node->delete(); // automatically cascades down because of onDelete('cascade') in DB
 
         return redirect()->back()->with('success', 'Node beserta cabangnya berhasil dihapus.');
+    }
+
+    public function updatePosition(Request $request, $id)
+    {
+        $request->validate([
+            'x' => 'required|numeric',
+            'y' => 'required|numeric',
+        ]);
+
+        $node = PohonKinerja::findOrFail($id);
+        $node->update([
+            'x' => $request->x,
+            'y' => $request->y,
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function updateConnection(Request $request, $id)
+    {
+        $request->validate([
+            'parent_id' => 'nullable|exists:pohon_kinerjas,id',
+        ]);
+
+        $node = PohonKinerja::findOrFail($id);
+        
+        // Basic cycle prevention could be added here
+        if ($request->parent_id == $node->id) {
+            return response()->json(['success' => false, 'message' => 'Cannot connect to itself'], 400);
+        }
+
+        $node->update([
+            'parent_id' => $request->parent_id,
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function duplicateBranch($id)
+    {
+        $node = PohonKinerja::findOrFail($id);
+        
+        $this->duplicateNodeRecursive($node, $node->parent_id);
+
+        return redirect()->back()->with('success', 'Cabang berhasil diduplikasi.');
+    }
+
+    private function duplicateNodeRecursive($node, $parentId)
+    {
+        $newNode = $node->replicate();
+        $newNode->parent_id = $parentId;
+        // Shift a bit to right and bottom so it doesn't completely overlap
+        if ($newNode->x !== null) $newNode->x += 50;
+        if ($newNode->y !== null) $newNode->y += 50;
+        $newNode->save();
+
+        $children = PohonKinerja::where('parent_id', $node->id)->get();
+        foreach ($children as $child) {
+            $this->duplicateNodeRecursive($child, $newNode->id);
+        }
+    }
+
+    public function generateAI(Request $request)
+    {
+        $request->validate([
+            'prompt' => 'required|string',
+        ]);
+
+        // Mock AI Generation - creating a simple tree
+        // In a real scenario, this would call OpenAI or Gemini API and parse the JSON
+        $opd_id = auth()->user()->opd_id;
+
+        $visi = PohonKinerja::create([
+            'jenis_node' => 'visi',
+            'deskripsi' => 'Visi: ' . $request->prompt,
+            'opd_id' => $opd_id,
+        ]);
+
+        $misi = PohonKinerja::create([
+            'jenis_node' => 'misi',
+            'deskripsi' => 'Misi untuk mendukung Visi',
+            'parent_id' => $visi->id,
+            'opd_id' => $opd_id,
+        ]);
+
+        $tujuan = PohonKinerja::create([
+            'jenis_node' => 'tujuan',
+            'deskripsi' => 'Tujuan Strategis AI',
+            'parent_id' => $misi->id,
+            'opd_id' => $opd_id,
+        ]);
+
+        return redirect()->back()->with('success', 'Struktur pohon berhasil di-generate dengan AI (Mock).');
     }
 }

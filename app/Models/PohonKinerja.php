@@ -18,5 +18,8 @@ class PohonKinerja extends Model
         'indikator',
         'target',
         'is_crosscutting',
+        'x',
+        'y',
+        'capaian',
     ];
 }
