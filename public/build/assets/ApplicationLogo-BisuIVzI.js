@@ -1,0 +1,1 @@
+import{n as e}from"./app-xLA4ymPw.js";var t=e();function n(e){return(0,t.jsx)(`img`,{...e,src:`/images/logo_sungai_penuh.png`,alt:`Logo Sungai Penuh`})}export{n as t};
