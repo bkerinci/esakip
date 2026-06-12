@@ -77,4 +77,24 @@ class RealisasiAnggaranController extends Controller
 
         return redirect()->back()->with('success', 'Data realisasi berhasil ditambahkan.');
     }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|mimes:xlsx,xls,csv|max:10240',
+        ]);
+
+        $opd_id = auth()->user()->opd_id;
+        if (!$opd_id) {
+            $firstOpd = \App\Models\Opd::first();
+            $opd_id = $firstOpd ? $firstOpd->id : null;
+        }
+
+        try {
+            \Maatwebsite\Excel\Facades\Excel::import(new \App\Imports\RealisasiAnggaranImport($opd_id), $request->file('file'));
+            return redirect()->back()->with('success', 'Data realisasi berhasil diimpor dari Excel.');
+        } catch (\Exception $e) {
+            return redirect()->back()->withErrors(['file' => 'Gagal mengimpor file: ' . $e->getMessage()]);
+        }
+    }
 }

@@ -1,5 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, useForm, usePage, router } from '@inertiajs/react';
+import PanduanUpload from '@/Components/PanduanUpload';
 
 export default function Calk({ documents }) {
     const { flash } = usePage().props;

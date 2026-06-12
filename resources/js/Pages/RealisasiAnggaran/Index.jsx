@@ -9,6 +9,7 @@ import SecondaryButton from '@/Components/SecondaryButton';
 
 export default function RealisasiIndex({ realisasi, tahun_aktif, opd_nama }) {
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     
     // Grouping the data for display: Program -> Kegiatan -> Sub Kegiatan
     const grouped = {};
@@ -65,6 +66,25 @@ export default function RealisasiIndex({ realisasi, tahun_aktif, opd_nama }) {
             onSuccess: () => {
                 setIsModalOpen(false);
                 reset();
+            }
+        });
+    };
+
+    const { data: uploadData, setData: setUploadData, post: postUpload, processing: uploadProcessing, errors: uploadErrors, reset: uploadReset } = useForm({
+        file: null,
+    });
+
+    const submitUpload = (e) => {
+        e.preventDefault();
+        postUpload(route('realisasi-anggaran.import'), {
+            preserveScroll: true,
+            onSuccess: () => {
+                setIsUploadModalOpen(false);
+                uploadReset();
+                alert('Data berhasil diimpor dari Excel!');
+            },
+            onError: () => {
+                alert('Gagal mengimpor data. Periksa format Excel Anda.');
             }
         });
     };
@@ -219,12 +239,16 @@ export default function RealisasiIndex({ realisasi, tahun_aktif, opd_nama }) {
                                 </select>
                             </div>
                             <div className="flex gap-2 print:hidden">
+                                <button onClick={() => setIsUploadModalOpen(true)} className="bg-emerald-600 text-white px-4 py-2 rounded-md shadow hover:bg-emerald-700 transition flex items-center">
+                                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                    Upload Excel
+                                </button>
                                 <button onClick={handlePrint} className="bg-slate-600 text-white px-4 py-2 rounded-md shadow hover:bg-slate-700 transition flex items-center">
                                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
                                     Cetak PDF
                                 </button>
                                 <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-md shadow hover:bg-blue-700 transition">
-                                    Tambah Realisasi (Sub Kegiatan)
+                                    Tambah Manual
                                 </button>
                             </div>
                         </div>
@@ -327,6 +351,50 @@ export default function RealisasiIndex({ realisasi, tahun_aktif, opd_nama }) {
                                     )}
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    {/* Panduan Import Excel */}
+                    <div className="mt-8 overflow-hidden bg-white shadow-sm sm:rounded-lg p-6 border-l-4 border-emerald-500 print:hidden">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            Panduan Import Excel
+                        </h3>
+                        <div className="text-sm text-gray-600 space-y-3">
+                            <p>Untuk mempermudah proses <strong>Upload Excel</strong>, pastikan file Anda mengikuti format baku berikut:</p>
+                            <ul className="list-disc list-inside ml-2 space-y-1">
+                                <li>Data harus berada di <strong>Sheet pertama</strong>.</li>
+                                <li>Baris pertama <strong>(Row 1)</strong> wajib berisi <strong>Judul Kolom / Header</strong> dengan huruf kecil semua.</li>
+                                <li>Baris kedua dan seterusnya adalah letak isi data realisasi Anda.</li>
+                                <li>Jika beberapa Sub Kegiatan memiliki nama Program atau Kegiatan yang sama, cukup kosongkan baris Program dan Kegiatannya pada baris data di bawahnya. Sistem akan secara otomatis menganggap sama.</li>
+                            </ul>
+                            
+                            <h4 className="font-semibold text-gray-800 mt-4 border-b pb-2">Susunan Kolom Excel (Kiri ke Kanan)</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 mt-2 bg-gray-50 p-4 rounded border font-mono text-xs">
+                                <div><strong className="text-emerald-600">Kolom A:</strong> tahun</div>
+                                <div><strong className="text-emerald-600">Kolom B:</strong> triwulan</div>
+                                <div><strong className="text-emerald-600">Kolom C:</strong> program</div>
+                                <div><strong className="text-emerald-600">Kolom D:</strong> kegiatan</div>
+                                <div><strong className="text-emerald-600">Kolom E:</strong> sub_kegiatan</div>
+                                
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom F:</strong> pegawai_anggaran</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom G:</strong> pegawai_realisasi_keuangan</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom H:</strong> pegawai_realisasi_fisik</div>
+                                
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom I:</strong> barang_jasa_anggaran</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom J:</strong> barang_jasa_realisasi_keuangan</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom K:</strong> barang_jasa_realisasi_fisik</div>
+                                
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom L:</strong> modal_anggaran</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom M:</strong> modal_realisasi_keuangan</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom N:</strong> modal_realisasi_fisik</div>
+                                
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom O:</strong> hibah_anggaran</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom P:</strong> hibah_realisasi_keuangan</div>
+                                <div className="mt-2"><strong className="text-emerald-600">Kolom Q:</strong> hibah_realisasi_fisik</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -436,6 +504,53 @@ export default function RealisasiIndex({ realisasi, tahun_aktif, opd_nama }) {
                         <div className="mt-6 flex justify-end">
                             <SecondaryButton onClick={() => setIsModalOpen(false)}>Batal</SecondaryButton>
                             <PrimaryButton className="ml-3" disabled={processing}>Simpan Data</PrimaryButton>
+                        </div>
+                    </form>
+                </div>
+            </Modal>
+            <Modal show={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)} maxWidth="2xl">
+                <div className="p-6">
+                    <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        Upload Data Realisasi dari Excel
+                    </h2>
+                    
+                    <div className="mb-4 bg-blue-50 border border-blue-200 p-4 rounded-md text-sm text-blue-800">
+                        <p className="font-semibold mb-1">Format Excel yang didukung (.xlsx, .xls, .csv):</p>
+                        <p>Pastikan baris pertama berisi judul kolom (huruf kecil semua) berikut:</p>
+                        <ul className="list-disc ml-5 mt-2 font-mono text-xs">
+                            <li>tahun</li>
+                            <li>triwulan</li>
+                            <li>program</li>
+                            <li>kegiatan</li>
+                            <li>sub_kegiatan</li>
+                            <li>pegawai_anggaran</li>
+                            <li>pegawai_realisasi_keuangan</li>
+                            <li>pegawai_realisasi_fisik</li>
+                            <li>barang_jasa_anggaran</li>
+                            <li>...dan seterusnya (sesuai kolom database).</li>
+                        </ul>
+                    </div>
+
+                    <form onSubmit={submitUpload} className="space-y-4">
+                        <div>
+                            <InputLabel htmlFor="file" value="Pilih File Excel/CSV" />
+                            <input 
+                                id="file" 
+                                type="file" 
+                                accept=".xlsx, .xls, .csv" 
+                                className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 border border-gray-300 rounded-md p-1"
+                                onChange={e => setUploadData('file', e.target.files[0])} 
+                                required 
+                            />
+                            {uploadErrors.file && <div className="text-red-500 text-xs mt-1">{uploadErrors.file}</div>}
+                        </div>
+
+                        <div className="mt-6 flex justify-end">
+                            <SecondaryButton onClick={() => setIsUploadModalOpen(false)}>Batal</SecondaryButton>
+                            <PrimaryButton className="ml-3 bg-emerald-600 hover:bg-emerald-700" disabled={uploadProcessing}>
+                                {uploadProcessing ? 'Mengunggah...' : 'Mulai Import'}
+                            </PrimaryButton>
                         </div>
                     </form>
                 </div>
